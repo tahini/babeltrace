@@ -683,6 +683,187 @@ void print_escape_string(struct pretty_component *pretty, const char *str)
 }
 
 static
+int print_enum_value_label_unknown(struct pretty_component *pretty)
+{
+	if (pretty->use_colors) {
+		bt_common_g_string_append(pretty->string, color_unknown);
+	}
+	bt_common_g_string_append(pretty->string, "<unknown>");
+	if (pretty->use_colors) {
+		bt_common_g_string_append(pretty->string, color_rst);
+	}
+	return 0;
+}
+
+static
+int print_enum_value_label_array(struct pretty_component *pretty,
+	uint64_t label_count,
+	bt_field_class_enumeration_mapping_label_array label_array)
+{
+	uint64_t i;
+
+	if (label_count > 1) {
+		bt_common_g_string_append(pretty->string, "{ ");
+	}
+	for (i = 0; i < label_count; i++) {
+		const char *mapping_name = label_array[i];
+
+		if (i != 0) {
+			bt_common_g_string_append(pretty->string, ", ");
+		}
+		if (pretty->use_colors) {
+			bt_common_g_string_append(pretty->string, color_enum_mapping_name);
+		}
+		print_escape_string(pretty, mapping_name);
+		if (pretty->use_colors) {
+			bt_common_g_string_append(pretty->string, color_rst);
+		}
+	}
+	if (label_count > 1) {
+		bt_common_g_string_append(pretty->string, " }");
+	}
+	return 0;
+}
+
+static
+int print_enum_try_bit_flags_unsigned(struct pretty_component *pretty,
+		const bt_field *field,
+		const bt_field_class *fc,
+		uint64_t int_range,
+		bt_field_class_enumeration_mapping_label_array label_arrays[],
+		uint64_t label_counts[])
+{
+	int ret = 0;
+	uint64_t i;
+	uint64_t value = bt_field_integer_unsigned_get_value(field);
+	bool shouldPrint = (value == 21);
+
+	if (shouldPrint) {
+		printf("Deubbing value %lu", value);
+	}
+	for (i = 0; i < int_range; i++) {
+		uint64_t bit_value = 1ULL << i;
+
+		if ((value & bit_value) != 0) {
+			ret = bt_field_class_enumeration_unsigned_get_mapping_labels_for_value(
+				fc, bit_value, &label_arrays[i], &label_counts[i]);
+			
+			if (shouldPrint) {
+				printf("Label results for %lu: %lu", bit_value, label_counts[i]);
+			}
+
+			if (ret) {
+				ret = -1;
+				goto end;
+			}
+
+			if (label_counts[i] == 0) {
+				/*
+				 * This bit has no matching label, so this
+				 * field is not a bit flag field, print
+				 * unknown and return
+				 */
+				print_enum_value_label_unknown(pretty);
+				ret = -1;
+				goto end;
+			}
+		} else {
+			label_counts[i] = 0;
+		}
+	}
+end:
+	return ret;
+}
+
+static
+int print_enum_try_bit_flags_signed(struct pretty_component *pretty,
+		const bt_field *field,
+		const bt_field_class *fc,
+		uint64_t int_range,
+		bt_field_class_enumeration_mapping_label_array label_arrays[],
+		uint64_t label_counts[])
+{
+	int ret = 0;
+	uint64_t i;
+	uint64_t value = bt_field_integer_signed_get_value(field);
+
+	for (i = 0; i < int_range; i++) {
+		uint64_t bit_value = 1ULL << i;
+
+		if ((value & bit_value) != 0) {
+			ret = bt_field_class_enumeration_signed_get_mapping_labels_for_value(
+				fc, bit_value, &label_arrays[i], &label_counts[i]);
+
+			if (ret) {
+				ret = -1;
+				goto end;
+			}
+
+			if (label_counts[i] == 0) {
+				/*
+				 * This bit has no matching label, so this
+				 * field is not a bit flag field, print
+				 * unknown and return
+				 */
+				print_enum_value_label_unknown(pretty);
+				ret = -1;
+				goto end;
+			}
+		} else {
+			label_counts[i] = 0;
+		}
+	}
+end:
+	return ret;
+}
+
+static
+int print_enum_try_bit_flags(struct pretty_component *pretty,
+		const bt_field *field,
+		const bt_field_class *fc)
+{
+	int ret = 0;
+	uint64_t i;
+	uint64_t int_range = bt_field_class_integer_get_field_value_range(fc);
+	uint64_t label_counts[int_range];
+	bt_field_class_enumeration_mapping_label_array label_arrays[int_range];
+	bool first_label = true;
+
+	// Get the mapping labels for the bit value
+	switch (bt_field_class_get_type(fc)) {
+	case BT_FIELD_CLASS_TYPE_UNSIGNED_ENUMERATION:
+		ret = print_enum_try_bit_flags_unsigned(pretty, field,
+			fc, int_range, label_arrays, label_counts);
+	break;
+	case BT_FIELD_CLASS_TYPE_SIGNED_ENUMERATION:
+		ret = print_enum_try_bit_flags_signed(pretty, field,
+			fc, int_range, label_arrays, label_counts);
+		break;
+	default:
+		bt_common_abort();
+	}
+
+	if (ret) {
+		ret = -1;
+		goto end;
+	}
+
+	/* Value is a bit flag, print the labels */
+	for (i = 0; i < int_range; i++) {
+		if (label_counts[i] > 0) {
+			if (!first_label) {
+				bt_common_g_string_append(pretty->string, " | ");
+			}
+			print_enum_value_label_array(pretty,
+				label_counts[i], label_arrays[i]);
+			first_label = false;
+		}
+	}
+end:
+	return ret;
+}
+
+static
 int print_enum(struct pretty_component *pretty,
 		const bt_field *field)
 {
@@ -690,7 +871,6 @@ int print_enum(struct pretty_component *pretty,
 	const bt_field_class *enumeration_field_class = NULL;
 	bt_field_class_enumeration_mapping_label_array label_array;
 	uint64_t label_count;
-	uint64_t i;
 
 	enumeration_field_class = bt_field_borrow_class_const(field);
 	if (!enumeration_field_class) {
@@ -717,31 +897,14 @@ int print_enum(struct pretty_component *pretty,
 	}
 
 	bt_common_g_string_append(pretty->string, "( ");
-	if (label_count == 0) {
-		if (pretty->use_colors) {
-			bt_common_g_string_append(pretty->string, color_unknown);
-		}
-		bt_common_g_string_append(pretty->string, "<unknown>");
-		if (pretty->use_colors) {
-			bt_common_g_string_append(pretty->string, color_rst);
-		}
-		goto skip_loop;
+	if (label_count != 0) {
+		print_enum_value_label_array(pretty, label_count, label_array);
+		goto print_container;
 	}
-	for (i = 0; i < label_count; i++) {
-		const char *mapping_name = label_array[i];
 
-		if (i != 0) {
-			bt_common_g_string_append(pretty->string, ", ");
-		}
-		if (pretty->use_colors) {
-			bt_common_g_string_append(pretty->string, color_enum_mapping_name);
-		}
-		print_escape_string(pretty, mapping_name);
-		if (pretty->use_colors) {
-			bt_common_g_string_append(pretty->string, color_rst);
-		}
-	}
-skip_loop:
+	ret = print_enum_try_bit_flags(pretty, field, enumeration_field_class);
+
+print_container:
 	bt_common_g_string_append(pretty->string, " : container = ");
 	ret = print_integer(pretty, field);
 	if (ret != 0) {
