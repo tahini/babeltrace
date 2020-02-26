@@ -1,0 +1,136 @@
+#!/bin/bash
+#
+# Copyright (C) 2020 Geneviève Bastien <gbastien@versatic.net>
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; only version 2
+# of the License.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+
+# This file tests pretty printing in details some event classes that are
+# not all covered by the main babeltrace tests with traces.
+
+SH_TAP=1
+
+if [ "x${BT_TESTS_SRCDIR:-}" != "x" ]; then
+	UTILSSH="$BT_TESTS_SRCDIR/utils/utils.sh"
+else
+	UTILSSH="$(dirname "$0")/../../utils/utils.sh"
+fi
+
+# shellcheck source=../../utils/utils.sh
+source "$UTILSSH"
+
+data_dir="$BT_TESTS_DATADIR/plugins/sink.text.pretty"
+temp_stdout_expected=$(mktemp)
+temp_stderr_expected="/dev/null"
+
+plan_tests 16
+
+function run_test
+{
+	local value="$1"
+	local test_text="$test_name signed:$enum_signed with value $value"
+	local local_args=(
+		"--plugin-path" "$data_dir"
+		"-c" "src.test-pretty.TheSourceOfAllEvil"
+		"-p" "enum-values=\"$enum_values\""
+		"-p" "value=$value"
+		"-p" "enum-signed=$enum_signed"
+		"-c" "sink.text.pretty"
+	)
+
+	bt_diff_cli "$temp_stdout_expected" "$temp_stderr_expected" "${local_args[@]}"
+	ok $? "$test_text"
+}
+
+function test_normal_enum {
+	test_name="Normal enum"
+	enum_signed="$1"
+	enum_values="single 1 1 single2 2 2 single3 4 4 range 4 8 range2 15 20"
+
+	# Hit a single value
+	cat <<- 'END' > "$temp_stdout_expected"
+	[19:05:00.000000000] (+?.?????????) with_enum: { enum_field = ( "single" : container = 1 ) }
+	END
+	run_test 1
+
+	# Hit a single range
+	cat <<- 'END' > "$temp_stdout_expected"
+	[19:05:00.000000000] (+?.?????????) with_enum: { enum_field = ( "range" : container = 7 ) }
+	END
+	run_test 7
+
+	# Hit a range and a value
+	cat <<- 'END' > "$temp_stdout_expected"
+	[19:05:00.000000000] (+?.?????????) with_enum: { enum_field = ( "single3", "range" : container = 4 ) }
+	END
+	run_test 4
+
+	# Unknown
+	cat <<- 'END' > "$temp_stdout_expected"
+	[19:05:00.000000000] (+?.?????????) with_enum: { enum_field = ( <unknown> : container = 21 ) }
+	END
+	run_test 21
+
+	# Unknown but with bits with a value, but range larger than 1 element
+	cat <<- 'END' > "$temp_stdout_expected"
+	[19:05:00.000000000] (+?.?????????) with_enum: { enum_field = ( <unknown> : container = 12 ) }
+	END
+	run_test 12
+
+	# Unknown value of 0
+	cat <<- 'END' > "$temp_stdout_expected"
+	[19:05:00.000000000] (+?.?????????) with_enum: { enum_field = ( <unknown> : container = 0 ) }
+	END
+	run_test 0
+}
+
+function test_normal_enum_negative {
+	test_name="Normal enum with negative"
+	enum_signed="true"
+	enum_values="zero 0 0 single 1 1 single2 2 2 single3 4 4 range 4 8 negative -1 -1 rangeNegative -6 -2"
+
+	# Hit a single negative value
+	cat <<- 'END' > "$temp_stdout_expected"
+	[19:05:00.000000000] (+?.?????????) with_enum: { enum_field = ( "negative" : container = -1 ) }
+	END
+	run_test -1
+
+	# Hit a single negative range
+	cat <<- 'END' > "$temp_stdout_expected"
+	[19:05:00.000000000] (+?.?????????) with_enum: { enum_field = ( "rangeNegative" : container = -6 ) }
+	END
+	run_test -6
+
+	# Unknown
+	cat <<- 'END' > "$temp_stdout_expected"
+	[19:05:00.000000000] (+?.?????????) with_enum: { enum_field = ( <unknown> : container = -7 ) }
+	END
+	run_test -7
+
+	# value of 0
+	cat <<- 'END' > "$temp_stdout_expected"
+	[19:05:00.000000000] (+?.?????????) with_enum: { enum_field = ( "zero" : container = 0 ) }
+	END
+	run_test 0
+
+}
+
+
+test_normal_enum "false"
+test_normal_enum "true"
+test_normal_enum_negative
+
+# Do not `rm` $temp_stderr_expected because it's set to `/dev/null` right now
+# and that would print an error.
+rm -f "$temp_stdout_expected"
