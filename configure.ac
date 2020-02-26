@@ -839,9 +839,9 @@ PPRINT_PROP_BOOL([Have Python interpreter], $value)
 test "x$have_python_dev" = "xyes" && value=1 || value=0
 PPRINT_PROP_BOOL([Have Python development libraries], $value)
 test "x$enable_python_bindings" = "xyes" && value=1 || value=0
-PPRINT_PROP_BOOL([Python bindings], $value)
+PPRINT_PROP_BOOL_CUSTOM([Python bindings], $value, [To enable, use --enable-python-bindings])
 test "x$enable_python_plugins" = "xyes" && value=1 || value=0
-PPRINT_PROP_BOOL([Python plugin support], $value)
+PPRINT_PROP_BOOL_CUSTOM([Python plugin support], $value, [To enable, use --enable-python-plugins])
 AS_IF([test "x$have_python" = "xyes"], [
   PPRINT_PROP_STRING([Python interpreter path], [$PYTHON])
 ])
