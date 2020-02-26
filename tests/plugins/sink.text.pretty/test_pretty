@@ -34,7 +34,7 @@ data_dir="$BT_TESTS_DATADIR/plugins/sink.text.pretty"
 temp_stdout_expected=$(mktemp)
 temp_stderr_expected="/dev/null"
 
-plan_tests 16
+plan_tests 28
 
 function run_test
 {
@@ -72,7 +72,7 @@ function test_normal_enum {
 
 	# Hit a range and a value
 	cat <<- 'END' > "$temp_stdout_expected"
-	[19:05:00.000000000] (+?.?????????) with_enum: { enum_field = ( "single3", "range" : container = 4 ) }
+	[19:05:00.000000000] (+?.?????????) with_enum: { enum_field = ( { "single3", "range" } : container = 4 ) }
 	END
 	run_test 4
 
@@ -126,10 +126,102 @@ function test_normal_enum_negative {
 
 }
 
+function test_bit_flag_enum {
+	test_name="Bit flag enum"
+	enum_signed="false"
+	enum_values="bit0 1 1 bit0bis 1 1 bit1 2 2 bit3 4 4 bit4 8 8 bit5 16 16 bit5 32 32"
+
+	# Single value hit
+	cat <<- 'END' > "$temp_stdout_expected"
+	[19:05:00.000000000] (+?.?????????) with_enum: { enum_field = ( "bit1" : container = 2 ) }
+	END
+	run_test 2
+
+	# Multiple flags set
+	cat <<- 'END' > "$temp_stdout_expected"
+	[19:05:00.000000000] (+?.?????????) with_enum: { enum_field = ( "bit3" | "bit4" : container = 12 ) }
+	END
+	run_test 12
+
+	# Some unknown bit
+	cat <<- 'END' > "$temp_stdout_expected"
+	[19:05:00.000000000] (+?.?????????) with_enum: { enum_field = ( <unknown> : container = 68 ) }
+	END
+	run_test 68
+
+	# Multiple labels for 1 bit
+	cat <<- 'END' > "$temp_stdout_expected"
+	[19:05:00.000000000] (+?.?????????) with_enum: { enum_field = ( { "bit0", "bit0bis" } : container = 1 ) }
+	END
+	run_test 1
+
+	# Single label for 1 bit
+	cat <<- 'END' > "$temp_stdout_expected"
+	[19:05:00.000000000] (+?.?????????) with_enum: { enum_field = ( "bit5" | "bit5" : container = 48 ) }
+	END
+	run_test 48
+
+	# negative value
+	enum_signed="true"
+	cat <<- 'END' > "$temp_stdout_expected"
+	[19:05:00.000000000] (+?.?????????) with_enum: { enum_field = ( <unknown> : container = -1 ) }
+	END
+	run_test -1
+}
+
+function test_mixed_enum {
+	test_name="Mixed enum bits at beginning"
+	enum_signed="false"
+	enum_values="bit0 1 1 bit1 2 2 bit2 4 4 bit3 8 8 bit4 16 16 range 32 44 singleValue 45 45"
+
+	# Value with bit fields
+	cat <<- 'END' > "$temp_stdout_expected"
+	[19:05:00.000000000] (+?.?????????) with_enum: { enum_field = ( "bit0" | "bit1" | "bit2" | "bit3" | "bit4" : container = 31 ) }
+	END
+	run_test 31
+
+	# A value with some bit flags set, but within another range
+	cat <<- 'END' > "$temp_stdout_expected"
+	[19:05:00.000000000] (+?.?????????) with_enum: { enum_field = ( "range" : container = 36 ) }
+	END
+	run_test 36
+
+	# A value with some bit flags set, but corresponding to another value
+	cat <<- 'END' > "$temp_stdout_expected"
+	[19:05:00.000000000] (+?.?????????) with_enum: { enum_field = ( "singleValue" : container = 45 ) }
+	END
+	run_test 45
+
+	# Value above the ranges
+	cat <<- 'END' > "$temp_stdout_expected"
+	[19:05:00.000000000] (+?.?????????) with_enum: { enum_field = ( <unknown> : container = 46 ) }
+	END
+	run_test 46
+
+	# Since low values are often powers of 2, they may be considered bit flags too
+	test_name="Mixed enum bits at end"
+	enum_signed="false"
+	enum_values="val1 1 1 val2 2 2 val3 3 3 val4 4 4 val5 5 5 bit3 8 8 bit4 16 16 bit5 32 32"
+
+	# Value with bit fields
+	cat <<- 'END' > "$temp_stdout_expected"
+	[19:05:00.000000000] (+?.?????????) with_enum: { enum_field = ( "bit4" : container = 16 ) }
+	END
+	run_test 16
+
+	# Value with a bit field set 
+	cat <<- 'END' > "$temp_stdout_expected"
+	[19:05:00.000000000] (+?.?????????) with_enum: { enum_field = ( "val1" | "bit4" : container = 17 ) }
+	END
+	run_test 17
+}
+
 
 test_normal_enum "false"
 test_normal_enum "true"
 test_normal_enum_negative
+test_bit_flag_enum
+test_mixed_enum
 
 # Do not `rm` $temp_stderr_expected because it's set to `/dev/null` right now
 # and that would print an error.

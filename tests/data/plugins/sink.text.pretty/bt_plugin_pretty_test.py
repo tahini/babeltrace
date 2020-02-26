@@ -18,9 +18,7 @@ class TheIteratorOfAllEvil(bt2._UserMessageIterator):
         self._msgs = []
 
         self._msgs.append(sb_msg)
-
         self._msgs.append(ev_msg1)
-
         self._msgs.append(se_msg)
 
         self._at = 0

@@ -726,7 +726,50 @@ int print_enum_value_label_array(struct pretty_component *pretty,
 }
 
 static
-int print_enum_try_bit_flags_unsigned(struct pretty_component *pretty,
+int print_enum_unsigned_get_mapping_labels_for_value(const bt_field_class *fc,
+	uint64_t value,
+	bt_field_class_enumeration_mapping_label_array *label_array,
+	uint64_t *count)
+{
+	uint64_t mapping_count = bt_field_class_enumeration_get_mapping_count(fc);
+	GPtrArray *labels = g_ptr_array_new ();
+	uint64_t i;
+
+	*count = 0;
+	for (i = 0; i < mapping_count; i++) {
+		uint64_t range_i;
+		const struct bt_field_class_enumeration_unsigned_mapping *mapping =
+			bt_field_class_enumeration_unsigned_borrow_mapping_by_index_const(fc, i);
+		const bt_integer_range_set_unsigned *ranges =
+			bt_field_class_enumeration_unsigned_mapping_borrow_ranges_const(mapping);
+
+		for (range_i = 0; range_i < bt_integer_range_set_get_range_count(
+				bt_integer_range_set_unsigned_as_range_set_const(ranges)); range_i++) {
+			const bt_integer_range_unsigned *range =
+				bt_integer_range_set_unsigned_borrow_range_by_index_const(ranges, range_i);
+			uint64_t lower = bt_integer_range_unsigned_get_lower(range);
+			uint64_t higher = bt_integer_range_unsigned_get_upper(range);
+	
+			/*
+			 * Flag is active if this range represents a single value 
+			 * (lower == higher) and the lower is the same as the bit
+			 * value to test against
+			 */
+			if ((lower == higher) && (lower == value)) {
+				g_ptr_array_add(labels, (void*) bt_field_class_enumeration_mapping_get_label(
+					bt_field_class_enumeration_unsigned_mapping_as_mapping_const(mapping)));
+				*count = *count + 1;
+				break;
+			}
+		}
+	}
+	*label_array = (void *) labels->pdata;
+
+	return 0;
+}
+
+static
+int print_enum_unsigned_try_bit_flags(struct pretty_component *pretty,
 		const bt_field *field,
 		const bt_field_class *fc,
 		uint64_t int_range,
@@ -736,21 +779,20 @@ int print_enum_try_bit_flags_unsigned(struct pretty_component *pretty,
 	int ret = 0;
 	uint64_t i;
 	uint64_t value = bt_field_integer_unsigned_get_value(field);
-	bool shouldPrint = (value == 21);
 
-	if (shouldPrint) {
-		printf("Deubbing value %lu", value);
+	/* Value is 0, if there was a label for it, we would know by now */
+	if (value == 0) {
+		print_enum_value_label_unknown(pretty);
+		ret = -1;
+		goto end;
 	}
+
 	for (i = 0; i < int_range; i++) {
 		uint64_t bit_value = 1ULL << i;
 
 		if ((value & bit_value) != 0) {
-			ret = bt_field_class_enumeration_unsigned_get_mapping_labels_for_value(
+			ret = print_enum_unsigned_get_mapping_labels_for_value(
 				fc, bit_value, &label_arrays[i], &label_counts[i]);
-			
-			if (shouldPrint) {
-				printf("Label results for %lu: %lu", bit_value, label_counts[i]);
-			}
 
 			if (ret) {
 				ret = -1;
@@ -776,7 +818,50 @@ end:
 }
 
 static
-int print_enum_try_bit_flags_signed(struct pretty_component *pretty,
+int print_enum_signed_get_mapping_labels_for_value(const bt_field_class *fc,
+	uint64_t value,
+	bt_field_class_enumeration_mapping_label_array *label_array,
+	uint64_t *count)
+{
+	uint64_t mapping_count = bt_field_class_enumeration_get_mapping_count(fc);
+	GPtrArray *labels = g_ptr_array_new ();
+	uint64_t i;
+
+	*count = 0;
+	for (i = 0; i < mapping_count; i++) {
+		uint64_t range_i;
+		const struct bt_field_class_enumeration_signed_mapping *mapping =
+			bt_field_class_enumeration_signed_borrow_mapping_by_index_const(fc, i);
+		const bt_integer_range_set_signed *ranges =
+			bt_field_class_enumeration_signed_mapping_borrow_ranges_const(mapping);
+
+		for (range_i = 0; range_i < bt_integer_range_set_get_range_count(
+				bt_integer_range_set_signed_as_range_set_const(ranges)); range_i++) {
+			const bt_integer_range_signed *range =
+				bt_integer_range_set_signed_borrow_range_by_index_const(ranges, range_i);
+			uint64_t lower = bt_integer_range_signed_get_lower(range);
+			uint64_t higher = bt_integer_range_signed_get_upper(range);
+	
+			/*
+			 * Flag is active if this range represents a single value 
+			 * (lower == higher) and the lower is the same as the bit
+			 * value to test against
+			 */
+			if ((lower == higher) && (lower == value)) {
+				g_ptr_array_add(labels, (void*) bt_field_class_enumeration_mapping_get_label(
+					bt_field_class_enumeration_signed_mapping_as_mapping_const(mapping)));
+				*count = *count + 1;
+				break;
+			}
+		}
+	}
+	*label_array = (void *) labels->pdata;
+
+	return 0;
+}
+
+static
+int print_enum_signed_try_bit_flags(struct pretty_component *pretty,
 		const bt_field *field,
 		const bt_field_class *fc,
 		uint64_t int_range,
@@ -787,11 +872,21 @@ int print_enum_try_bit_flags_signed(struct pretty_component *pretty,
 	uint64_t i;
 	uint64_t value = bt_field_integer_signed_get_value(field);
 
+	/* 
+	 * Negative value, not a bit flag enum
+	 * For 0, if there was a value, we would know by now
+	 */
+	if (value <= 0) {
+		print_enum_value_label_unknown(pretty);
+		ret = -1;
+		goto end;
+	}
+
 	for (i = 0; i < int_range; i++) {
 		uint64_t bit_value = 1ULL << i;
 
 		if ((value & bit_value) != 0) {
-			ret = bt_field_class_enumeration_signed_get_mapping_labels_for_value(
+			ret = print_enum_signed_get_mapping_labels_for_value(
 				fc, bit_value, &label_arrays[i], &label_counts[i]);
 
 			if (ret) {
@@ -832,11 +927,11 @@ int print_enum_try_bit_flags(struct pretty_component *pretty,
 	// Get the mapping labels for the bit value
 	switch (bt_field_class_get_type(fc)) {
 	case BT_FIELD_CLASS_TYPE_UNSIGNED_ENUMERATION:
-		ret = print_enum_try_bit_flags_unsigned(pretty, field,
+		ret = print_enum_unsigned_try_bit_flags(pretty, field,
 			fc, int_range, label_arrays, label_counts);
 	break;
 	case BT_FIELD_CLASS_TYPE_SIGNED_ENUMERATION:
-		ret = print_enum_try_bit_flags_signed(pretty, field,
+		ret = print_enum_signed_try_bit_flags(pretty, field,
 			fc, int_range, label_arrays, label_counts);
 		break;
 	default:
